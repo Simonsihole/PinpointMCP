@@ -71,8 +71,8 @@ app.post('/payload', (req, res) => {
     }
   }).catch(() => {});
   
-  // LOG TO STDOUT so the Antigravity background task manager wakes me up
-  console.log(`\n\n--- NEW PINPOINT BATCH DETECTED ---\n${instructionList}\nFile saved to: .latest-payload.json\n-------------------------------------\n\n`);
+  // LOG TO STDERR so it doesn't corrupt the MCP JSON-RPC stdout stream
+  console.error(`\n\n--- NEW PINPOINT BATCH DETECTED ---\n${instructionList}\nFile saved to: .latest-payload.json\n-------------------------------------\n\n`);
   
   res.json({ success: true, mcp_delivered: true });
 });
