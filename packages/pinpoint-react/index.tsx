@@ -68,13 +68,31 @@ export default function PinpointSelector() {
     }
   }, []);
 
+  // Prevent UI from going off-screen during window resizes
+  useEffect(() => {
+    function handleResize() {
+      if (typeof window !== "undefined") {
+        setPos(p => ({
+          x: Math.min(Math.max(0, p.x), window.innerWidth - 350),
+          y: Math.min(Math.max(0, p.y), window.innerHeight - 300)
+        }));
+        setTogglePos(p => ({
+          x: Math.min(Math.max(0, p.x), window.innerWidth - 180),
+          y: Math.min(Math.max(0, p.y), window.innerHeight - 60)
+        }));
+      }
+    }
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
   // Drag handlers for command center
   useEffect(() => {
     if (!isDragging) return;
     function onMove(e: MouseEvent) {
       setPos({
-        x: dragRef.current.initialX + (e.clientX - dragRef.current.startX),
-        y: dragRef.current.initialY + (e.clientY - dragRef.current.startY)
+        x: Math.min(Math.max(0, dragRef.current.initialX + (e.clientX - dragRef.current.startX)), window.innerWidth - 350),
+        y: Math.min(Math.max(0, dragRef.current.initialY + (e.clientY - dragRef.current.startY)), window.innerHeight - 300)
       });
     }
     function onUp() { setIsDragging(false); }
@@ -88,8 +106,8 @@ export default function PinpointSelector() {
     if (!isDraggingToggle) return;
     function onMove(e: MouseEvent) {
       setTogglePos({
-        x: dragToggleRef.current.initialX + (e.clientX - dragToggleRef.current.startX),
-        y: dragToggleRef.current.initialY + (e.clientY - dragToggleRef.current.startY)
+        x: Math.min(Math.max(0, dragToggleRef.current.initialX + (e.clientX - dragToggleRef.current.startX)), window.innerWidth - 180),
+        y: Math.min(Math.max(0, dragToggleRef.current.initialY + (e.clientY - dragToggleRef.current.startY)), window.innerHeight - 60)
       });
     }
     function onUp() { setIsDraggingToggle(false); }
