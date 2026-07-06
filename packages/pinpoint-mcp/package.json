@@ -1,0 +1,14 @@
+{
+  "name": "@antigravity/pinpoint-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for Pinpoint UI selector",
+  "main": "index.js",
+  "bin": {
+    "pinpoint-mcp": "./index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.2"
+  }
+}
