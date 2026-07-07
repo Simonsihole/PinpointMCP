@@ -116,7 +116,7 @@ function main() {
       rows: process.stdout.rows || 24,
       cwd: process.cwd(),
       env: process.env,
-      useShell: process.platform === \'win32\',
+      useShell: process.platform === 'win32',
       useShell: process.platform === 'win32'
     });
   } catch (err) {
