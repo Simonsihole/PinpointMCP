@@ -110,14 +110,15 @@ function main() {
 
   let shell;
   try {
-    shell = pty.spawn(cmd, cmdArgs, {
+    const ptyCmd = process.platform === 'win32' ? 'cmd.exe' : cmd;
+    const ptyArgs = process.platform === 'win32' ? ['/c', cmd, ...cmdArgs] : cmdArgs;
+
+    shell = pty.spawn(ptyCmd, ptyArgs, {
       name: 'xterm-256color',
       cols: process.stdout.columns || 80,
       rows: process.stdout.rows || 24,
       cwd: process.cwd(),
-      env: process.env,
-      useShell: process.platform === 'win32',
-      useShell: process.platform === 'win32'
+      env: process.env
     });
   } catch (err) {
     console.error(`[pinpoint-launch] Couldn't start "${cmd}": ${err.message}`);
