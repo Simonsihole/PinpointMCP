@@ -1,0 +1,67 @@
+[
+  {
+    "mode": "local",
+    "timestamp": "2026-07-06T16:29:55.026Z",
+    "page_url": "http://localhost:3000/",
+    "instruction": "change name to zhafran alvinci in green color",
+    "target": {
+      "selector": "div.grid.grid-cols-1 > div.lg:col-span-2.space-y-6:nth-of-type(1) > section.glass-panel.rounded-2xl:nth-of-type(1) > div.space-y-5 > div:nth-of-type(1) > input.w-full.bg-black/40",
+      "tag": "input",
+      "classes": [
+        "w-full",
+        "bg-black/40",
+        "border",
+        "border-white/10",
+        "rounded-xl",
+        "px-4",
+        "py-2.5",
+        "text-white",
+        "text-sm",
+        "focus:outline-none",
+        "focus:border-brand-500",
+        "transition-colors"
+      ],
+      "bounding_box": {
+        "x": 73,
+        "y": 332,
+        "width": 452,
+        "height": 42
+      },
+      "computed_styles": {
+        "background-color": "oklab(0 0 0 / 0.4)",
+        "color": "rgb(255, 255, 255)",
+        "font-size": "14px",
+        "font-weight": "400",
+        "padding": "10px 16px",
+        "margin": "0px",
+        "border": "0.909091px solid oklab(0.999994 0.0000455678 0.0000200868 / 0.1)",
+        "border-radius": "12px",
+        "display": "inline-block",
+        "position": "static",
+        "width": "452.386px",
+        "height": "41.8182px"
+      },
+      "dom_path": [
+        "html.h-full",
+        "body.min-h-full",
+        "main.p-10",
+        "div.grid",
+        "div.lg:col-span-2",
+        "section.glass-panel",
+        "div.space-y-5",
+        "div",
+        "input.w-full"
+      ],
+      "source": {
+        "file": null,
+        "line": null,
+        "confidence": "none"
+      }
+    },
+    "screenshot_crop": null,
+    "surrounding_context": {
+      "parent_html_snippet": "<div><label class=\"block text-sm font-medium text-zinc-300 mb-1.5\">Full Name</label><input type=\"text\" class=\"w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-brand-500 transition-colors\" value=\"Simon Doe\"></div>",
+      "siblings_count": 1
+    }
+  }
+]
