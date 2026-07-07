@@ -115,7 +115,8 @@ function main() {
       cols: process.stdout.columns || 80,
       rows: process.stdout.rows || 24,
       cwd: process.cwd(),
-      env: process.env
+      env: process.env,
+      useShell: process.platform === 'win32'
     });
   } catch (err) {
     console.error(`[pinpoint-launch] Couldn't start "${cmd}": ${err.message}`);
