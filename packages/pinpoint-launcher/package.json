@@ -1,0 +1,21 @@
+{
+  "name": "pinpoint-launcher",
+  "version": "1.0.0",
+  "description": "PTY wrapper that runs your terminal-based AI coding agent (OpenCode, Antigravity CLI, Claude Code, Codex, aider, etc.) and injects a trigger message the instant a Pinpoint batch arrives, instead of requiring you to manually tell the agent to check.",
+  "license": "MIT",
+  "main": "index.js",
+  "bin": {
+    "pinpoint-launch": "./index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "index.js"
+  ],
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "node-pty": "^1.1.0"
+  }
+}

@@ -1,0 +1,820 @@
+diff --git a/README.md b/README.md
+index 7ebbeb2..73da6dd 100644
+--- a/README.md
++++ b/README.md
+@@ -15,12 +15,56 @@ Instead of tediously describing UI elements to your AI (e.g., *"Make that blue b
+ 
+ ## How it actually works (read this before wiring it into an agent)
+ 
+-Pinpoint has two halves that don't talk to each other directly:
++Pinpoint has three parts:
+ 
+-1. The **React component** runs in your browser tab, captures the selection, and POSTs a batch to `http://127.0.0.1:31337/payload` when you hit "Send".
+-2. The **MCP server** runs locally, receives that POST, and holds it in memory until your AI agent calls its `read_pinpoint_payload` tool.
++1. **The React component** runs in your browser tab, captures the selection, and POSTs a batch to `http://127.0.0.1:31337/payload` when you hit "Send".
++2. **The launcher** (`pinpoint-launcher`) runs your actual agent CLI — OpenCode, Antigravity (`agy`), Claude Code, Codex, aider, or anything else that's a terminal program — wrapped in a pty. It receives that POST directly and, once the agent has gone quiet for a moment (so it never interrupts an in-progress response), writes a real keystroke sequence into the wrapped process's stdin. This is indistinguishable from you typing "check pinpoint" and hitting Enter yourself.
++3. **The MCP server** (`pinpoint-mcp`) is what your agent talks to over MCP for the actual `read_pinpoint_payload` tool call. It reads a small shared file that the launcher writes to — it doesn't run its own HTTP server anymore.
+ 
+-When a batch arrives, the server also emits an MCP logging notification as a hint. Whether that actually makes your agent "wake up" mid-conversation depends entirely on your MCP client — most clients only expose it as a log line, not as something injected into the model's context. **In practice, the reliable flow today is:** click "Send Batch" in the browser, then tell your agent something like *"check for new Pinpoint instructions"* so it calls `read_pinpoint_payload`. It's a two-step handoff, not a fully automatic one — this section will be updated if/when MCP clients standardize a way to proactively surface server-initiated messages.
++**Why it's split this way:** the MCP server is a child process your agent spawns purely for JSON-RPC tool calls. It has no access to the terminal you're typing into, so it can never "type" into the agent's TUI itself. MCP's own notification mechanism (`notifications/message`) is a passive log line — there's no standard MCP mechanism to force an idle agent to start a new turn. The launcher sidesteps this entirely by *being* the terminal the agent runs in, so it can inject input directly, regardless of which agent you're using.
++
++**This only works for terminal/TUI-based agents.** It does **not** help with GUI-only clients (the Cursor IDE panel, Claude Desktop's chat window) since there's no equivalent "wrap the input" hook for those — the two-step "click Send, then ask the agent to check" flow still applies there.
++
++### Running your agent through the launcher
++Install it once:
++```bash
++npm install -g pinpoint-launcher
++```
++Then start your agent through it instead of running it directly — no `--` needed for a plain command:
++```bash
++pinpoint-launch agy         # Antigravity CLI
++pinpoint-launch opencode    # OpenCode
++pinpoint-launch claude      # Claude Code
++pinpoint-launch codex       # Codex CLI
++```
++If your agent's own command takes flags, put `--` before it so the launcher doesn't try to parse them as its own:
++```bash
++pinpoint-launch -- claude --model sonnet
++pinpoint-launch --port 31337 -- aider --model gpt-4
++```
++Everything you type still passes straight through — the launcher is invisible until a batch arrives. A few things it handles for you automatically:
++- **Debouncing:** rapid "Send Batch" clicks within ~400ms are coalesced into a single injected message.
++- **Idle-detection:** if the agent is actively streaming a response when a batch arrives, the launcher waits for a quiet moment before injecting, so it never interrupts mid-output — capped at 5 seconds so it never waits forever either.
++
++Optional flags:
++```bash
++pinpoint-launch --port 31337 --trigger "Check Pinpoint now" --quiet-ms 600 --max-wait-ms 5000 -- opencode
++```
++| Flag | Default | Meaning |
++|---|---|---|
++| `--port` | `31337` | HTTP port to receive batches on (must match the browser client) |
++| `--trigger` | auto-generated | Fixed text to inject instead of the default summary message |
++| `--quiet-ms` | `600` | How long the agent must be silent before injecting |
++| `--max-wait-ms` | `5000` | Inject anyway after this long, even if the agent hasn't gone quiet |
++
++`pinpoint-launch --help` prints this at any time.
++
++**Native dependency note:** `pinpoint-launcher` depends on `node-pty`, which has native bindings. Most platforms get a prebuilt binary automatically; if none is available for your OS/Node version, npm will try to compile it, which needs standard build tools installed first — Xcode Command Line Tools (macOS), `build-essential` + `python3` (Linux), or Visual Studio Build Tools (Windows).
++
++### Troubleshooting
++- **"Port already in use"** — another `pinpoint-launch` instance is probably still running from a previous session. Stop it, or pass a different `--port` (and update the browser client to match).
++- **Agent doesn't react to the injected message** — increase `--max-wait-ms` if your agent's TUI redraws/animates constantly (e.g. a spinner) in a way that never looks "quiet"; the cap guarantees injection eventually happens regardless.
++- **Command not found** — `pinpoint-launch <cmd>` fails immediately with a clear error if `<cmd>` isn't installed or on your `PATH`; install/alias it the same way you normally would, then point the launcher at it.
+ 
+ ---
+ 
+@@ -73,7 +117,15 @@ Configure your AI Agent to connect to it. For example, in **Google Antigravity**
+ ```
+ (If your client doesn't resolve global bin scripts by name, point `command` at `node` and `args` at the absolute path to the installed `index.js`, e.g. via `npm root -g`.)
+ 
+-Restart your AI agent. The server listens on `127.0.0.1:31337`; if that port is already in use (usually a leftover instance from a previous session), it logs a warning to stderr instead of crashing — check your MCP client's server logs if the browser toast says it can't connect.
++Restart your AI agent.
++
++### 3. The Launcher (for instant auto-trigger, terminal agents only)
++If your agent runs in a terminal (OpenCode, Antigravity CLI, Claude Code, Codex, aider, etc.) and you want batches to trigger it automatically instead of typing "check pinpoint" yourself every time:
++```bash
++npm install -g pinpoint-launcher
++pinpoint-launch agy
++```
++This is what now binds `127.0.0.1:31337` (the MCP server no longer does — see the architecture note above). If your agent is a GUI-only client (Cursor's IDE panel, Claude Desktop), skip this step; the two-step "click Send Batch, then ask me to check" flow still applies there.
+ 
+ ---
+ 
+@@ -85,7 +137,7 @@ If you are an AI Coding Agent reading this README, the user wants you to install
+ 2. **Inject the UI**: Locate their root layout file (e.g., `app/layout.tsx` or `src/App.tsx`) and add `<PinpointSelector />`, wrapped in a development-only check.
+ 3. **Install the Server**: Run `npm install -g pinpoint-mcp` (or as a dev dependency if the user prefers not to install globally).
+ 4. **Configure MCP**: Add the Pinpoint server to the user's MCP configuration JSON, per the snippet above.
+-5. **Confirm**: Tell the user Pinpoint is installed, and mention the two-step "click Send Batch, then ask me to check for new Pinpoint instructions" flow described above — don't imply it's fully automatic.
++5. **Ask if they run their agent in a terminal** (OpenCode, Antigravity CLI, Claude Code, Codex, aider, etc.). If so, offer to install `pinpoint-launcher` too (`npm install -g pinpoint-launcher`) and tell them to start their agent via `pinpoint-launch <their normal agent command>` from now on for automatic, instant triggering. If they're on a GUI-only client, skip this and tell them the two-step "click Send Batch, then ask me to check" flow still applies.
+ 
+ ---
+ 
+@@ -98,16 +150,17 @@ npm run dev
+ ```
+ Navigate to `http://localhost:3000`, press `Alt+P` to summon the Pinpoint command center, and try editing the dashboard. (`predev`/`prebuild` automatically rebuild `pinpoint-react` first, so the demo always runs against the same compiled output real consumers get.)
+ 
+-To try the MCP server side too, run it separately and POST a test batch:
++To try the full auto-trigger flow, run the launcher wrapping any command (even just `cat`, to see raw injected text echoed back) and POST a test batch:
+ ```bash
+-node packages/pinpoint-mcp/index.js
++node packages/pinpoint-launcher/index.js cat
+ curl -X POST http://127.0.0.1:31337/payload \
+   -H "Content-Type: application/json" \
+   -d '{"batch":[{"instruction":"test"}]}'
+ ```
++You should see the auto-generated trigger message echoed back shortly after. To exercise the MCP side (the actual `read_pinpoint_payload` tool call), point your MCP client at `node packages/pinpoint-mcp/index.js` — it reads whatever the launcher last wrote to the shared temp file.
+ 
+ ## Publishing (maintainer notes)
+-Both packages are plain npm packages under no scope — `pinpoint-react` and `pinpoint-mcp`. `pinpoint-react` has a `build` script (tsup) that must run before publish; `prepublishOnly` isn't wired up yet, so run `npm run build --workspace=packages/pinpoint-react` manually before `npm publish` until that's automated.
++All three packages are plain npm packages under no scope — `pinpoint-react`, `pinpoint-mcp`, and `pinpoint-launcher`. `pinpoint-react` has a `build` script (tsup) that must run before publish; `prepublishOnly` isn't wired up yet, so run `npm run build --workspace=packages/pinpoint-react` manually before `npm publish` until that's automated. `pinpoint-launcher` has native bindings via `node-pty` — verify `npm install` succeeds cleanly on a fresh checkout across platforms before publishing a new version, since a broken prebuild story there breaks the whole auto-trigger flow.
+ 
+ ## License
+ MIT — see [LICENSE](./LICENSE).
+diff --git a/package-lock.json b/package-lock.json
+index a2c6b9b..478b6b0 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -6772,6 +6772,12 @@
+         "node": "^10 || ^12 || >=14"
+       }
+     },
++    "node_modules/node-addon-api": {
++      "version": "7.1.1",
++      "resolved": "https://registry.npmjs.org/node-addon-api/-/node-addon-api-7.1.1.tgz",
++      "integrity": "sha512-5m3bsyrjFWE1xf7nz7YXdN4udnVtXK6/Yfgn5qnahL6bCkf2yKt4k3nuTKAtT4r3IG8JNR2ncsIMdZuAzJjHQQ==",
++      "license": "MIT"
++    },
+     "node_modules/node-exports-info": {
+       "version": "1.6.2",
+       "resolved": "https://registry.npmjs.org/node-exports-info/-/node-exports-info-1.6.2.tgz",
+@@ -6791,6 +6797,16 @@
+         "url": "https://github.com/sponsors/ljharb"
+       }
+     },
++    "node_modules/node-pty": {
++      "version": "1.1.0",
++      "resolved": "https://registry.npmjs.org/node-pty/-/node-pty-1.1.0.tgz",
++      "integrity": "sha512-20JqtutY6JPXTUnL0ij1uad7Qe1baT46lyolh2sSENDd4sTzKZ4nmAFkeAARDKwmlLjPx6XKRlwRUxwjOy+lUg==",
++      "hasInstallScript": true,
++      "license": "MIT",
++      "dependencies": {
++        "node-addon-api": "^7.1.0"
++      }
++    },
+     "node_modules/node-releases": {
+       "version": "2.0.50",
+       "resolved": "https://registry.npmjs.org/node-releases/-/node-releases-2.0.50.tgz",
+@@ -7095,6 +7111,10 @@
+         "url": "https://github.com/sponsors/jonschlinkert"
+       }
+     },
++    "node_modules/pinpoint-launcher": {
++      "resolved": "packages/pinpoint-launcher",
++      "link": true
++    },
+     "node_modules/pinpoint-mcp": {
+       "resolved": "packages/pinpoint-mcp",
+       "link": true
+@@ -8838,22 +8858,22 @@
+         "zod": "^3.25.0 || ^4.0.0"
+       }
+     },
+-    "packages/pinpoint-mcp": {
++    "packages/pinpoint-launcher": {
+       "version": "1.0.0",
+       "license": "MIT",
+       "dependencies": {
+-        "@modelcontextprotocol/sdk": "^1.0.0",
+         "cors": "^2.8.5",
+-        "express": "^4.21.2"
++        "express": "^4.21.2",
++        "node-pty": "^1.1.0"
+       },
+       "bin": {
+-        "pinpoint-mcp": "index.js"
++        "pinpoint-launch": "index.js"
+       },
+       "engines": {
+         "node": ">=18"
+       }
+     },
+-    "packages/pinpoint-mcp/node_modules/accepts": {
++    "packages/pinpoint-launcher/node_modules/accepts": {
+       "version": "1.3.8",
+       "resolved": "https://registry.npmjs.org/accepts/-/accepts-1.3.8.tgz",
+       "integrity": "sha512-PYAthTa2m2VKxuvSD3DPC/Gy+U+sOA1LAuT8mkmRuvw+NACSaeXEQ+NHcVF7rONl6qcaxV3Uuemwawk+7+SJLw==",
+@@ -8866,7 +8886,7 @@
+         "node": ">= 0.6"
+       }
+     },
+-    "packages/pinpoint-mcp/node_modules/body-parser": {
++    "packages/pinpoint-launcher/node_modules/body-parser": {
+       "version": "1.20.5",
+       "resolved": "https://registry.npmjs.org/body-parser/-/body-parser-1.20.5.tgz",
+       "integrity": "sha512-3grm+/2tUOvu2cjJkvsIxrv/wVpfXQW4PsQHYm7yk4vfpu7Ekl6nEsYBoJUL6qDwZUx8wUhQ8tR2qz+ad9c9OA==",
+@@ -8890,7 +8910,7 @@
+         "npm": "1.2.8000 || >= 1.4.16"
+       }
+     },
+-    "packages/pinpoint-mcp/node_modules/content-disposition": {
++    "packages/pinpoint-launcher/node_modules/content-disposition": {
+       "version": "0.5.4",
+       "resolved": "https://registry.npmjs.org/content-disposition/-/content-disposition-0.5.4.tgz",
+       "integrity": "sha512-FveZTNuGw04cxlAiWbzi6zTAL/lhehaWbTtgluJh4/E95DqMwTmha3KZN1aAWA8cFIhHzMZUvLevkw5Rqk+tSQ==",
+@@ -8902,13 +8922,13 @@
+         "node": ">= 0.6"
+       }
+     },
+-    "packages/pinpoint-mcp/node_modules/cookie-signature": {
++    "packages/pinpoint-launcher/node_modules/cookie-signature": {
+       "version": "1.0.7",
+       "resolved": "https://registry.npmjs.org/cookie-signature/-/cookie-signature-1.0.7.tgz",
+       "integrity": "sha512-NXdYc3dLr47pBkpUCHtKSwIOQXLVn8dZEuywboCOJY/osA0wFSLlSawr3KN8qXJEyX66FcONTH8EIlVuK0yyFA==",
+       "license": "MIT"
+     },
+-    "packages/pinpoint-mcp/node_modules/debug": {
++    "packages/pinpoint-launcher/node_modules/debug": {
+       "version": "2.6.9",
+       "resolved": "https://registry.npmjs.org/debug/-/debug-2.6.9.tgz",
+       "integrity": "sha512-bC7ElrdJaJnPbAP+1EotYvqZsb3ecl5wi6Bfi6BJTUcNowp6cvspg0jXznRTKDjm/E7AdgFBVeAPVMNcKGsHMA==",
+@@ -8917,13 +8937,13 @@
+         "ms": "2.0.0"
+       }
+     },
+-    "packages/pinpoint-mcp/node_modules/debug/node_modules/ms": {
++    "packages/pinpoint-launcher/node_modules/debug/node_modules/ms": {
+       "version": "2.0.0",
+       "resolved": "https://registry.npmjs.org/ms/-/ms-2.0.0.tgz",
+       "integrity": "sha512-Tpp60P6IUJDTuOq/5Z8cdskzJujfwqfOTkrwIwj7IRISpnkJnT6SyJ4PCPnGMoFjC9ddhal5KVIYtAt97ix05A==",
+       "license": "MIT"
+     },
+-    "packages/pinpoint-mcp/node_modules/express": {
++    "packages/pinpoint-launcher/node_modules/express": {
+       "version": "4.22.2",
+       "resolved": "https://registry.npmjs.org/express/-/express-4.22.2.tgz",
+       "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+@@ -8969,7 +8989,7 @@
+         "url": "https://opencollective.com/express"
+       }
+     },
+-    "packages/pinpoint-mcp/node_modules/finalhandler": {
++    "packages/pinpoint-launcher/node_modules/finalhandler": {
+       "version": "1.3.2",
+       "resolved": "https://registry.npmjs.org/finalhandler/-/finalhandler-1.3.2.tgz",
+       "integrity": "sha512-aA4RyPcd3badbdABGDuTXCMTtOneUCAYH/gxoYRTZlIJdF0YPWuGqiAsIrhNnnqdXGswYk6dGujem4w80UJFhg==",
+@@ -8987,7 +9007,7 @@
+         "node": ">= 0.8"
+       }
+     },
+-    "packages/pinpoint-mcp/node_modules/fresh": {
++    "packages/pinpoint-launcher/node_modules/fresh": {
+       "version": "0.5.2",
+       "resolved": "https://registry.npmjs.org/fresh/-/fresh-0.5.2.tgz",
+       "integrity": "sha512-zJ2mQYM18rEFOudeV4GShTGIQ7RbzA7ozbU9I/XBpm7kqgMywgmylMwXHxZJmkVoYkna9d2pVXVXPdYTP9ej8Q==",
+@@ -8996,7 +9016,7 @@
+         "node": ">= 0.6"
+       }
+     },
+-    "packages/pinpoint-mcp/node_modules/iconv-lite": {
++    "packages/pinpoint-launcher/node_modules/iconv-lite": {
+       "version": "0.4.24",
+       "resolved": "https://registry.npmjs.org/iconv-lite/-/iconv-lite-0.4.24.tgz",
+       "integrity": "sha512-v3MXnZAcvnywkTUEZomIActle7RXXeedOR31wwl7VlyoXO4Qi9arvSenNQWne1TcRwhCL1HwLI21bEqdpj8/rA==",
+@@ -9008,7 +9028,7 @@
+         "node": ">=0.10.0"
+       }
+     },
+-    "packages/pinpoint-mcp/node_modules/media-typer": {
++    "packages/pinpoint-launcher/node_modules/media-typer": {
+       "version": "0.3.0",
+       "resolved": "https://registry.npmjs.org/media-typer/-/media-typer-0.3.0.tgz",
+       "integrity": "sha512-dq+qelQ9akHpcOl/gUVRTxVIOkAJ1wR3QAvb4RsVjS8oVoFjDGTc679wJYmUmknUF5HwMLOgb5O+a3KxfWapPQ==",
+@@ -9017,7 +9037,7 @@
+         "node": ">= 0.6"
+       }
+     },
+-    "packages/pinpoint-mcp/node_modules/merge-descriptors": {
++    "packages/pinpoint-launcher/node_modules/merge-descriptors": {
+       "version": "1.0.3",
+       "resolved": "https://registry.npmjs.org/merge-descriptors/-/merge-descriptors-1.0.3.tgz",
+       "integrity": "sha512-gaNvAS7TZ897/rVaZ0nMtAyxNyi/pdbjbAwUpFQpN70GqnVfOiXpeUUMKRBmzXaSQ8DdTX4/0ms62r2K+hE6mQ==",
+@@ -9026,7 +9046,7 @@
+         "url": "https://github.com/sponsors/sindresorhus"
+       }
+     },
+-    "packages/pinpoint-mcp/node_modules/mime-db": {
++    "packages/pinpoint-launcher/node_modules/mime-db": {
+       "version": "1.52.0",
+       "resolved": "https://registry.npmjs.org/mime-db/-/mime-db-1.52.0.tgz",
+       "integrity": "sha512-sPU4uV7dYlvtWJxwwxHD0PuihVNiE7TyAbQ5SWxDCB9mUYvOgroQOwYQQOKPJ8CIbE+1ETVlOoK1UC2nU3gYvg==",
+@@ -9035,7 +9055,7 @@
+         "node": ">= 0.6"
+       }
+     },
+-    "packages/pinpoint-mcp/node_modules/mime-types": {
++    "packages/pinpoint-launcher/node_modules/mime-types": {
+       "version": "2.1.35",
+       "resolved": "https://registry.npmjs.org/mime-types/-/mime-types-2.1.35.tgz",
+       "integrity": "sha512-ZDY+bPm5zTTF+YpCrAU9nK0UgICYPT0QtT1NZWFv4s++TNkcgVaT0g6+4R2uI4MjQjzysHB1zxuWL50hzaeXiw==",
+@@ -9047,7 +9067,7 @@
+         "node": ">= 0.6"
+       }
+     },
+-    "packages/pinpoint-mcp/node_modules/negotiator": {
++    "packages/pinpoint-launcher/node_modules/negotiator": {
+       "version": "0.6.3",
+       "resolved": "https://registry.npmjs.org/negotiator/-/negotiator-0.6.3.tgz",
+       "integrity": "sha512-+EUsqGPLsM+j/zdChZjsnX51g4XrHFOIXwfnCVPGlQk/k5giakcKsuxCObBRu6DSm9opw/O6slWbJdghQM4bBg==",
+@@ -9056,13 +9076,13 @@
+         "node": ">= 0.6"
+       }
+     },
+-    "packages/pinpoint-mcp/node_modules/path-to-regexp": {
++    "packages/pinpoint-launcher/node_modules/path-to-regexp": {
+       "version": "0.1.13",
+       "resolved": "https://registry.npmjs.org/path-to-regexp/-/path-to-regexp-0.1.13.tgz",
+       "integrity": "sha512-A/AGNMFN3c8bOlvV9RreMdrv7jsmF9XIfDeCd87+I8RNg6s78BhJxMu69NEMHBSJFxKidViTEdruRwEk/WIKqA==",
+       "license": "MIT"
+     },
+-    "packages/pinpoint-mcp/node_modules/range-parser": {
++    "packages/pinpoint-launcher/node_modules/range-parser": {
+       "version": "1.2.1",
+       "resolved": "https://registry.npmjs.org/range-parser/-/range-parser-1.2.1.tgz",
+       "integrity": "sha512-Hrgsx+orqoygnmhFbKaHE6c296J+HTAQXoxEF6gNupROmmGJRoyzfG3ccAveqCBrwr/2yxQ5BVd/GTl5agOwSg==",
+@@ -9071,7 +9091,7 @@
+         "node": ">= 0.6"
+       }
+     },
+-    "packages/pinpoint-mcp/node_modules/raw-body": {
++    "packages/pinpoint-launcher/node_modules/raw-body": {
+       "version": "2.5.3",
+       "resolved": "https://registry.npmjs.org/raw-body/-/raw-body-2.5.3.tgz",
+       "integrity": "sha512-s4VSOf6yN0rvbRZGxs8Om5CWj6seneMwK3oDb4lWDH0UPhWcxwOWw5+qk24bxq87szX1ydrwylIOp2uG1ojUpA==",
+@@ -9086,7 +9106,7 @@
+         "node": ">= 0.8"
+       }
+     },
+-    "packages/pinpoint-mcp/node_modules/send": {
++    "packages/pinpoint-launcher/node_modules/send": {
+       "version": "0.19.2",
+       "resolved": "https://registry.npmjs.org/send/-/send-0.19.2.tgz",
+       "integrity": "sha512-VMbMxbDeehAxpOtWJXlcUS5E8iXh6QmN+BkRX1GARS3wRaXEEgzCcB10gTQazO42tpNIya8xIyNx8fll1OFPrg==",
+@@ -9110,7 +9130,7 @@
+         "node": ">= 0.8.0"
+       }
+     },
+-    "packages/pinpoint-mcp/node_modules/serve-static": {
++    "packages/pinpoint-launcher/node_modules/serve-static": {
+       "version": "1.16.3",
+       "resolved": "https://registry.npmjs.org/serve-static/-/serve-static-1.16.3.tgz",
+       "integrity": "sha512-x0RTqQel6g5SY7Lg6ZreMmsOzncHFU7nhnRWkKgWuMTu5NN0DR5oruckMqRvacAN9d5w6ARnRBXl9xhDCgfMeA==",
+@@ -9125,7 +9145,7 @@
+         "node": ">= 0.8.0"
+       }
+     },
+-    "packages/pinpoint-mcp/node_modules/type-is": {
++    "packages/pinpoint-launcher/node_modules/type-is": {
+       "version": "1.6.18",
+       "resolved": "https://registry.npmjs.org/type-is/-/type-is-1.6.18.tgz",
+       "integrity": "sha512-TkRKr9sUTxEH8MdfuCSP7VizJyzRNMjj2J2do2Jr3Kym598JVdEksuzPQCnlFPW4ky9Q+iA+ma9BGm06XQBy8g==",
+@@ -9138,6 +9158,19 @@
+         "node": ">= 0.6"
+       }
+     },
++    "packages/pinpoint-mcp": {
++      "version": "1.0.0",
++      "license": "MIT",
++      "dependencies": {
++        "@modelcontextprotocol/sdk": "^1.0.0"
++      },
++      "bin": {
++        "pinpoint-mcp": "index.js"
++      },
++      "engines": {
++        "node": ">=18"
++      }
++    },
+     "packages/pinpoint-react": {
+       "version": "1.0.0",
+       "license": "MIT",
+diff --git a/packages/pinpoint-launcher/index.js b/packages/pinpoint-launcher/index.js
+new file mode 100644
+index 0000000..8a78604
+--- /dev/null
++++ b/packages/pinpoint-launcher/index.js
+@@ -0,0 +1,232 @@
++#!/usr/bin/env node
++
++// pinpoint-launch — wraps ANY terminal-based coding agent (opencode, agy,
++// claude, codex, aider, etc.) in a pty, so Pinpoint can inject a synthetic
++// "check for new instructions" message directly into the agent's input the
++// instant a batch arrives from the browser — no more manually typing
++// "I sent a batch" yourself.
++//
++// Why this has to live here instead of in pinpoint-mcp: the MCP server is a
++// separate child process the agent spawns over stdio purely for JSON-RPC
++// tool calls. It has no access to the terminal the human is actually typing
++// into, so it can never "type" into the agent's TUI. This launcher process
++// IS that terminal (it pty-wraps the agent), so it can.
++//
++// Usage:
++//   pinpoint-launch agy
++//   pinpoint-launch opencode
++//   pinpoint-launch -- claude --model sonnet
++//   pinpoint-launch --port 31337 --trigger "Check pinpoint" -- aider
++
++const os = require('os');
++const path = require('path');
++const fs = require('fs');
++const express = require('express');
++const cors = require('cors');
++
++let pty;
++try {
++  pty = require('node-pty');
++} catch (err) {
++  console.error(
++    '[pinpoint-launch] Missing dependency "node-pty". This package uses ' +
++    'native bindings, so if a prebuilt binary isn\'t available for your ' +
++    'platform/Node version, npm needs to compile it — install build tools ' +
++    'first: Xcode Command Line Tools (macOS), build-essential + python3 ' +
++    '(Linux), or Visual Studio Build Tools (Windows), then reinstall.\n' +
++    'Original error: ' + err.message
++  );
++  process.exit(1);
++}
++
++const PAYLOAD_FILE = path.join(os.tmpdir(), 'pinpoint-mcp-latest-payload.json');
++
++// Last-resort safety net: node-pty's spawn failure mode varies (some
++// versions throw synchronously, others surface it as an async 'error'
++// event on the underlying child process) — this ensures either way the
++// person sees one clean line instead of a raw stack trace.
++process.on('uncaughtException', (err) => {
++  console.error(`[pinpoint-launch] Fatal error: ${err.message}`);
++  if (err.code === 'ENOENT') {
++    console.error('[pinpoint-launch] Check that the command is installed and on your PATH.');
++  }
++  process.exit(1);
++});
++
++const HELP = `pinpoint-launch — run your AI coding agent so Pinpoint batches trigger it instantly
++
++Usage:
++  pinpoint-launch <agent command> [args...]
++  pinpoint-launch -- <agent command> [args...]
++
++Examples:
++  pinpoint-launch agy
++  pinpoint-launch opencode
++  pinpoint-launch claude
++  pinpoint-launch codex
++  pinpoint-launch -- aider --model sonnet
++
++Options:
++  --port <n>          HTTP port to receive batches on (default: 31337)
++  --trigger <text>     Fixed message to inject instead of the auto-generated one
++  --quiet-ms <n>       How long the agent must be silent before injecting (default: 600)
++  --max-wait-ms <n>    Inject anyway after this long, even if not quiet (default: 5000)
++  --help, -h           Show this help
++`;
++
++function parseArgs(argv) {
++  const opts = { port: 31337, trigger: null, quietMs: 600, maxWaitMs: 5000, command: [], help: false };
++  const rest = [];
++  for (let i = 0; i < argv.length; i++) {
++    const arg = argv[i];
++    if (arg === '--') { rest.push(...argv.slice(i + 1)); break; }
++    if (arg === '--port') { opts.port = Number(argv[++i]); continue; }
++    if (arg === '--trigger') { opts.trigger = argv[++i]; continue; }
++    if (arg === '--quiet-ms') { opts.quietMs = Number(argv[++i]); continue; }
++    if (arg === '--max-wait-ms') { opts.maxWaitMs = Number(argv[++i]); continue; }
++    if (arg === '--help' || arg === '-h') { opts.help = true; continue; }
++    rest.push(arg);
++  }
++  opts.command = rest;
++  return opts;
++}
++
++function buildTriggerMessage(trigger, batch) {
++  if (trigger) return trigger;
++  const count = Array.isArray(batch) ? batch.length : 0;
++  const plural = count === 1 ? 'instruction' : 'instructions';
++  return `Pinpoint sent ${count} new ${plural} — call read_pinpoint_payload and apply them.`;
++}
++
++function main() {
++  const opts = parseArgs(process.argv.slice(2));
++
++  if (opts.help || !opts.command.length) {
++    console.log(HELP);
++    process.exit(opts.help ? 0 : 1);
++  }
++
++  const [cmd, ...cmdArgs] = opts.command;
++
++  let shell;
++  try {
++    shell = pty.spawn(cmd, cmdArgs, {
++      name: 'xterm-256color',
++      cols: process.stdout.columns || 80,
++      rows: process.stdout.rows || 24,
++      cwd: process.cwd(),
++      env: process.env
++    });
++  } catch (err) {
++    console.error(`[pinpoint-launch] Couldn't start "${cmd}": ${err.message}`);
++    console.error(`[pinpoint-launch] Check that "${cmd}" is installed and on your PATH.`);
++    process.exit(1);
++  }
++
++  console.error(
++    `[pinpoint-launch] Wrapping "${[cmd, ...cmdArgs].join(' ')}" — ` +
++    `listening for Pinpoint batches on http://127.0.0.1:${opts.port}/payload`
++  );
++
++  // --- Transparent passthrough: the human still interacts exactly as before ---
++  let lastOutputTime = Date.now();
++  if (process.stdin.isTTY) process.stdin.setRawMode(true);
++  process.stdin.resume();
++  process.stdin.on('data', (data) => shell.write(data.toString()));
++  shell.onData((data) => {
++    lastOutputTime = Date.now();
++    process.stdout.write(data);
++  });
++
++  process.stdout.on('resize', () => {
++    try {
++      shell.resize(process.stdout.columns, process.stdout.rows);
++    } catch {
++      // Ignore resize races against process teardown.
++    }
++  });
++
++  const restoreAndExit = (code) => {
++    if (process.stdin.isTTY) process.stdin.setRawMode(false);
++    process.exit(code);
++  };
++  shell.onExit(({ exitCode }) => restoreAndExit(exitCode ?? 0));
++  process.on('SIGINT', () => shell.write('\x03'));
++  process.on('SIGTERM', () => shell.kill());
++
++  // Injects only once the wrapped agent has been quiet for `quietMs` —
++  // avoids shoving text into the middle of an in-progress response — but
++  // never waits longer than `maxWaitMs`, so a busy/animated TUI can't
++  // delay delivery indefinitely.
++  function scheduleInjection(message) {
++    const start = Date.now();
++    (function tryInject() {
++      const idleFor = Date.now() - lastOutputTime;
++      const waitedFor = Date.now() - start;
++      if (idleFor >= opts.quietMs || waitedFor >= opts.maxWaitMs) {
++        shell.write(message + '\r');
++        return;
++      }
++      setTimeout(tryInject, 150);
++    })();
++  }
++
++  // --- Payload receiver: same endpoint the browser already POSTs to ---
++  const app = express();
++  app.use(cors());
++  app.use(express.json({ limit: '10mb' }));
++
++  // Debounce: if several "Send Batch" clicks land within this window,
++  // coalesce them into a single injected message instead of spamming the
++  // agent's input with one line per click.
++  const DEBOUNCE_MS = 400;
++  let pendingBatch = null;
++  let debounceTimer = null;
++
++  app.post('/payload', (req, res) => {
++    const batch = req.body?.batch || [];
++    if (!batch.length) {
++      return res.status(400).json({ success: false, error: 'Empty batch' });
++    }
++
++    pendingBatch = batch;
++    try {
++      fs.writeFileSync(PAYLOAD_FILE, JSON.stringify(batch, null, 2));
++    } catch (err) {
++      console.error(`[pinpoint-launch] Could not write payload file: ${err.message}`);
++    }
++
++    if (debounceTimer) clearTimeout(debounceTimer);
++    debounceTimer = setTimeout(() => {
++      const message = buildTriggerMessage(opts.trigger, pendingBatch);
++      scheduleInjection(message);
++      pendingBatch = null;
++      debounceTimer = null;
++    }, DEBOUNCE_MS);
++
++    res.json({ success: true, injected: true });
++  });
++
++  app.use((err, _req, res, _next) => {
++    console.error(`[pinpoint-launch] Bad request: ${err.message}`);
++    res.status(400).json({ success: false, error: 'Invalid request body' });
++  });
++
++  const httpServer = app.listen(opts.port, '127.0.0.1', () => {
++    // Deliberately quiet on success — the startup line above already covers it.
++  });
++  httpServer.on('error', (err) => {
++    if (err.code === 'EADDRINUSE') {
++      console.error(
++        `[pinpoint-launch] Port ${opts.port} is already in use — another ` +
++        `pinpoint-launch instance may still be running. Stop it, or pass ` +
++        `--port to use a different one (update the Pinpoint browser ` +
++        `client's port too if you do).`
++      );
++    } else {
++      console.error(`[pinpoint-launch] HTTP server failed to start: ${err.message}`);
++    }
++  });
++}
++
++main();
+diff --git a/packages/pinpoint-launcher/package.json b/packages/pinpoint-launcher/package.json
+new file mode 100644
+index 0000000..01007be
+--- /dev/null
++++ b/packages/pinpoint-launcher/package.json
+@@ -0,0 +1,21 @@
++{
++  "name": "pinpoint-launcher",
++  "version": "1.0.0",
++  "description": "PTY wrapper that runs your terminal-based AI coding agent (OpenCode, Antigravity CLI, Claude Code, Codex, aider, etc.) and injects a trigger message the instant a Pinpoint batch arrives, instead of requiring you to manually tell the agent to check.",
++  "license": "MIT",
++  "main": "index.js",
++  "bin": {
++    "pinpoint-launch": "./index.js"
++  },
++  "engines": {
++    "node": ">=18"
++  },
++  "files": [
++    "index.js"
++  ],
++  "dependencies": {
++    "cors": "^2.8.5",
++    "express": "^4.21.2",
++    "node-pty": "^1.1.0"
++  }
++}
+diff --git a/packages/pinpoint-mcp/index.js b/packages/pinpoint-mcp/index.js
+old mode 100644
+new mode 100755
+index 2d38d27..993cafb
+--- a/packages/pinpoint-mcp/index.js
++++ b/packages/pinpoint-mcp/index.js
+@@ -3,24 +3,17 @@
+ const path = require('path');
+ const os = require('os');
+ const fs = require('fs');
+-const express = require('express');
+-const cors = require('cors');
+ const { Server } = require('@modelcontextprotocol/sdk/server/index.js');
+ const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
+ const { ListToolsRequestSchema, CallToolRequestSchema } = require('@modelcontextprotocol/sdk/types.js');
+ 
+-const PORT = 31337;
+-
+-// Written to the OS temp dir (not process.cwd()) because this process is
+-// usually spawned by an AI agent / MCP client with an unpredictable, and
+-// sometimes read-only, working directory.
++// Shared with pinpoint-launcher, which is what actually receives the
++// browser's POST /payload now (see README — the HTTP receiver moved there
++// so it can also inject a trigger keystroke into the agent's pty; this
++// process only ever talks to the agent over MCP stdio, so it has no
++// terminal to "type" into). This file is the handoff point between the two.
+ const PAYLOAD_FILE = path.join(os.tmpdir(), 'pinpoint-mcp-latest-payload.json');
+ 
+-// Store the latest payload in memory
+-let latestPayload = null;
+-
+-// Don't let one bad request or a protocol edge case silently kill the whole
+-// stdio connection to the AI agent — log it loudly instead so it's debuggable.
+ process.on('uncaughtException', (err) => {
+   console.error('[pinpoint-mcp] Uncaught exception:', err);
+ });
+@@ -28,27 +21,20 @@ process.on('unhandledRejection', (err) => {
+   console.error('[pinpoint-mcp] Unhandled rejection:', err);
+ });
+ 
+-// Initialize MCP Server
+ const server = new Server({
+   name: "pinpoint-mcp",
+-  version: "1.0.0"
++  version: "1.1.0"
+ }, {
+   capabilities: {
+-    tools: {},
+-    // Required for the notifications/message log hint sent in the
+-    // /payload handler below — without this the SDK rejects the
+-    // notification outright (previously swallowed silently by an empty
+-    // .catch(), so the "wake up" notification was never actually sent).
+-    logging: {}
++    tools: {}
+   }
+ });
+ 
+-// Expose a tool to read the latest pinpoint payload
+ server.setRequestHandler(ListToolsRequestSchema, async () => {
+   return {
+     tools: [{
+       name: "read_pinpoint_payload",
+-      description: "Reads the most recent UI element selection payload sent from the Pinpoint React component.",
++      description: "Reads the most recent UI element selection payload sent from the Pinpoint React component. Call this whenever you're told a new Pinpoint batch is available.",
+       inputSchema: { type: "object", properties: {} }
+     }]
+   };
+@@ -56,88 +42,20 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
+ 
+ server.setRequestHandler(CallToolRequestSchema, async (request) => {
+   if (request.params.name === "read_pinpoint_payload") {
+-    if (!latestPayload) {
++    let payload;
++    try {
++      const raw = fs.readFileSync(PAYLOAD_FILE, 'utf-8');
++      payload = JSON.parse(raw);
++    } catch {
+       return { content: [{ type: "text", text: "No payload available." }] };
+     }
+     return {
+-      content: [{ type: "text", text: JSON.stringify(latestPayload, null, 2) }]
++      content: [{ type: "text", text: JSON.stringify(payload, null, 2) }]
+     };
+   }
+   throw new Error("Tool not found");
+ });
+ 
+-// Setup Express to receive payloads from the React component
+-const app = express();
+-app.use(cors());
+-app.use(express.json({ limit: '10mb' }));
+-
+-app.post('/payload', (req, res) => {
+-  const batch = req.body?.batch || [];
+-  if (!batch.length) {
+-    return res.status(400).json({ success: false, error: "Empty batch" });
+-  }
+-
+-  // Save the latest batch to memory (this is what the read_pinpoint_payload
+-  // tool actually serves) and best-effort to disk for manual debugging.
+-  // The disk write is a convenience, not the source of truth, so a failure
+-  // here (read-only tmpdir, disk full, etc.) must never break the request.
+-  latestPayload = batch;
+-  try {
+-    fs.writeFileSync(PAYLOAD_FILE, JSON.stringify(batch, null, 2));
+-  } catch (err) {
+-    console.error(`[pinpoint-mcp] Could not write debug payload file: ${err.message}`);
+-  }
+-
+-  // Build the message summarizing the batch
+-  const instructionList = batch.map((p, i) => `${i + 1}. ${p.instruction}`).join('\n');
+-
+-  // NOTE: "notifications/message" is the MCP *logging* notification — most
+-  // clients surface it as a log line, not as a message injected into the
+-  // model's context. There is currently no standard MCP mechanism to force
+-  // an idle agent to react mid-conversation, so this is a best-effort nudge,
+-  // not a guarantee. The reliable path is the agent calling
+-  // read_pinpoint_payload — either because it noticed this log, or because
+-  // the user asked it to check.
+-  server.notification({
+-    method: "notifications/message",
+-    params: {
+-      level: "info",
+-      logger: "pinpoint-mcp",
+-      data: `Received ${batch.length} new Pinpoint instruction(s). Call read_pinpoint_payload to fetch them:\n${instructionList}`
+-    }
+-  }).catch((err) => {
+-    console.error(`[pinpoint-mcp] Failed to send notification: ${err.message}`);
+-  });
+-
+-  // LOG TO STDERR so it doesn't corrupt the MCP JSON-RPC stdout stream
+-  console.error(`\n\n--- NEW PINPOINT BATCH DETECTED ---\n${instructionList}\nDebug copy saved to: ${PAYLOAD_FILE}\n-------------------------------------\n\n`);
+-
+-  res.json({ success: true, mcp_delivered: true });
+-});
+-
+-// Surface malformed JSON bodies as a proper JSON error instead of falling
+-// through to Express's default HTML error page (which would make the React
+-// client's `!res.ok` check report a misleading "can't connect" toast).
+-app.use((err, _req, res, _next) => {
+-  console.error(`[pinpoint-mcp] Bad request: ${err.message}`);
+-  res.status(400).json({ success: false, error: "Invalid request body" });
+-});
+-
+-// Start Express. If the port is already taken — most likely a previous
+-// Pinpoint server instance still running — log a clear reason instead of
+-// letting an unhandled 'error' event crash the whole stdio MCP connection.
+-const httpServer = app.listen(PORT, '127.0.0.1', () => {
+-  // Silence Express logs to not pollute stdio
+-});
+-httpServer.on('error', (err) => {
+-  if (err.code === 'EADDRINUSE') {
+-    console.error(`[pinpoint-mcp] Port ${PORT} is already in use — another Pinpoint server may already be running. The MCP tool connection will stay up, but the browser extension can't reach this instance. If this port shouldn't be in use, stop the other process and restart your AI agent.`);
+-  } else {
+-    console.error(`[pinpoint-mcp] Local server failed to start: ${err.message}`);
+-  }
+-});
+-
+-// Start MCP Server on stdio
+ async function main() {
+   const transport = new StdioServerTransport();
+   await server.connect(transport);
+diff --git a/packages/pinpoint-mcp/package.json b/packages/pinpoint-mcp/package.json
+index 8112baa..9ddce5e 100644
+--- a/packages/pinpoint-mcp/package.json
++++ b/packages/pinpoint-mcp/package.json
+@@ -14,8 +14,6 @@
+     "index.js"
+   ],
+   "dependencies": {
+-    "@modelcontextprotocol/sdk": "^1.0.0",
+-    "cors": "^2.8.5",
+-    "express": "^4.21.2"
++    "@modelcontextprotocol/sdk": "^1.0.0"
+   }
+ }
