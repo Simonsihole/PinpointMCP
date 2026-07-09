@@ -1,6 +1,11 @@
-# Pinpoint
+# 🎯 Pinpoint
 
-Pinpoint is a developer tool that brings an "Inspect Element" workflow directly into your AI coding agent (like Google Antigravity, Claude Desktop, or Cursor).
+[![pinpoint-react](https://img.shields.io/npm/v/pinpoint-react.svg?style=flat-square&color=blue&label=pinpoint-react)](https://www.npmjs.com/package/pinpoint-react)
+[![pinpoint-mcp](https://img.shields.io/npm/v/pinpoint-mcp.svg?style=flat-square&color=green&label=pinpoint-mcp)](https://www.npmjs.com/package/pinpoint-mcp)
+[![pinpoint-launcher](https://img.shields.io/npm/v/pinpoint-launcher.svg?style=flat-square&color=purple&label=pinpoint-launcher)](https://www.npmjs.com/package/pinpoint-launcher)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](https://opensource.org/licenses/MIT)
+
+Pinpoint is a developer tool that brings an "Inspect Element" workflow directly into your AI coding agent (like Google Antigravity, Claude Code, OpenCode, or Cursor).
 
 Instead of tediously describing UI elements to your AI (e.g., *"Make that blue button in the third card on the left bigger"*), you simply press `Alt+P`, click the element on your screen, and type your instructions. Pinpoint captures the DOM context, computes styles, and builds a comprehensive payload that is sent to your AI via the Model Context Protocol (MCP).
 
