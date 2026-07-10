@@ -1,8 +1,5 @@
 # 🎯 Pinpoint
 
-[![pinpoint-react](https://img.shields.io/npm/v/pinpoint-react.svg?style=flat-square&color=blue&label=pinpoint-react)](https://www.npmjs.com/package/pinpoint-react)
-[![pinpoint-mcp](https://img.shields.io/npm/v/pinpoint-mcp.svg?style=flat-square&color=green&label=pinpoint-mcp)](https://www.npmjs.com/package/pinpoint-mcp)
-[![pinpoint-launcher](https://img.shields.io/npm/v/pinpoint-launcher.svg?style=flat-square&color=purple&label=pinpoint-launcher)](https://www.npmjs.com/package/pinpoint-launcher)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](https://opensource.org/licenses/MIT)
 
 Pinpoint is a developer tool that brings an "Inspect Element" workflow directly into your AI coding agent (like Google Antigravity, Claude Code, OpenCode, or Cursor).
