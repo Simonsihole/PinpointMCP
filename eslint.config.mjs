@@ -19,6 +19,7 @@ const eslintConfig = defineConfig([
     // this Next.js app — eslint-config-next's React/TS rules (e.g. banning
     // require()) don't apply to it. It can grow its own lint setup later.
     "packages/pinpoint-mcp/**",
+    "packages/pinpoint-launcher/**",
   ]),
 ]);
 
